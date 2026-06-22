@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>蝦皮 備貨天數 工具</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, "Microsoft JhengHei", sans-serif;
+           max-width: 920px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    h1 { margin: 0; font-size: 1.4rem; }
+    .status { font-size: .9rem; opacity: .85; }
+    .pill { display: inline-block; padding: .15rem .6rem; border-radius: 999px;
+            background: #e5e7eb; color: #111; font-size: .8rem; margin-left: .5rem; }
+    .pill.ok { background: #16a34a; color: #fff; }
+    .pill.err { background: #dc2626; color: #fff; }
+    .pill.run { background: #2563eb; color: #fff; }
+    button#run { padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer;
+                 border: 0; border-radius: 6px; background: #2563eb; color: #fff; }
+    button#run:disabled { background: #9ca3af; cursor: not-allowed; }
+    section { margin-top: 1.5rem; }
+    h2 { font-size: 1.05rem; border-bottom: 1px solid #8884; padding-bottom: .3rem; }
+    pre#log { background: #0b1021; color: #d6deeb; padding: 1rem; border-radius: 8px;
+              height: 360px; overflow-y: auto; font-size: .82rem; white-space: pre-wrap; }
+    .lv-ERROR { color: #ff6b6b; } .lv-WARNING { color: #ffd166; } .lv-INFO { color: #9ae6b4; }
+    ul { list-style: none; padding: 0; }
+    li { padding: .3rem 0; border-bottom: 1px solid #8884; display: flex; justify-content: space-between; }
+    .hint { opacity: .7; font-size: .85rem; margin-top: .3rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>蝦皮台灣 · 備貨天數 批次工具</h1>
+      <div class="status">
+        狀態：<span id="state">載入中…</span>
+        <span id="cfg-pill" class="pill">config</span>
+      </div>
+    </div>
+    <button id="run" onclick="startRun()">▶ 立即執行</button>
+  </header>
+
+  <section>
+    <h2>上次結果</h2>
+    <div id="last" class="hint">尚未執行</div>
+  </section>
+
+  <section>
+    <h2>已下載檔案 (data/extracted)</h2>
+    <ul id="files"><li class="hint">—</li></ul>
+  </section>
+
+  <section>
+    <h2>即時記錄</h2>
+    <pre id="log"></pre>
+  </section>
+
+<script>
+let since = 0;
+const logEl = document.getElementById('log');
+
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+async function poll(){
+  try {
+    const [st, lg] = await Promise.all([
+      fetch('/api/status').then(r=>r.json()),
+      fetch('/api/logs?since='+since).then(r=>r.json()),
+    ]);
+    // status
+    document.getElementById('state').textContent = st.running ? '執行中…' : '閒置';
+    document.getElementById('run').disabled = st.running;
+    const cp = document.getElementById('cfg-pill');
+    cp.textContent = st.config_ok ? 'config OK' : 'config 未設定';
+    cp.className = 'pill ' + (st.config_ok ? 'ok' : 'err');
+    if (st.last) {
+      const L = st.last;
+      document.getElementById('last').innerHTML =
+        `<b>${L.ok ? '✅ 成功' : '❌ 失敗'}</b> (階段: ${L.phase})` +
+        (L.error ? `<br>錯誤: ${esc(L.error)}` : '') +
+        (L.spreadsheet_path ? `<br>檔案: ${esc(L.spreadsheet_path)}` : '') +
+        `<br>步驟: ${L.stages.join(' → ')}`;
+    }
+    // logs
+    if (lg.logs && lg.logs.length){
+      lg.logs.forEach(e => {
+        since = Math.max(since, e.ts);
+        const line = `[${new Date(e.ts*1000).toLocaleTimeString()}] ${e.level.padEnd(7)} ${e.msg}\n`;
+        const span = document.createElement('span');
+        span.className = 'lv-'+e.level;
+        span.textContent = line;
+        logEl.appendChild(span);
+      });
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch(e){ /* transient */ }
+}
+
+async function refreshFiles(){
+  const data = await fetch('/api/downloads').then(r=>r.json());
+  const ul = document.getElementById('files');
+  ul.innerHTML = '';
+  if (!data.files.length){ ul.innerHTML = '<li class="hint">尚無檔案</li>'; return; }
+  data.files.forEach(f => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${esc(f.name)}</span><span>${(f.size/1024).toFixed(1)} KB</span>`;
+    ul.appendChild(li);
+  });
+}
+
+async function startRun(){
+  const r = await fetch('/api/run', {method:'POST'}).then(r=>r.json());
+  if (!r.started){ alert('無法啟動：' + (r.reason||'未知原因')); }
+}
+
+poll(); refreshFiles();
+setInterval(poll, 1500);
+setInterval(refreshFiles, 8000);
+</script>
+</body>
+</html>

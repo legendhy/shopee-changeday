@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: system-ui, -apple-system, "Microsoft JhengHei", sans-serif;
+           width: 380px; margin: 0; padding: 12px; font-size: 13px; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    label { display: block; margin: 6px 0 2px; color: #444; }
+    input { width: 100%; box-sizing: border-box; padding: 5px 6px; font-size: 13px;
+            border: 1px solid #ccc; border-radius: 4px; }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    button { flex: 1; padding: 8px; font-size: 13px; cursor: pointer; border: 0;
+             border-radius: 4px; background: #2563eb; color: #fff; }
+    button.secondary { background: #6b7280; }
+    button:disabled { background: #9ca3af; }
+    #status { margin-top: 8px; font-size: 12px; color: #555; min-height: 16px; }
+    pre#log { background: #0b1021; color: #d6deeb; padding: 8px; border-radius: 6px;
+              height: 220px; overflow-y: auto; font-size: 11px; white-space: pre-wrap;
+              margin-top: 8px; }
+    .e-ERROR { color: #ff6b6b; } .e-WARNING { color: #ffd166; } .e-info { color: #9ae6b4; }
+    .hint { color:#888; font-size:11px; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <h1>蝦皮備貨天數 → 改 1 天</h1>
+
+  <label>蝦皮帳號</label>
+  <input id="account" placeholder="帳號 / Email" />
+
+  <label>密碼</label>
+  <input id="password" type="password" placeholder="密碼" />
+
+  <label>SPC_F cookie</label>
+  <input id="spc_f" placeholder="貼上 SPC_F cookie 值" />
+  <div class="hint">優先用 SPC_F 免登入；偶爾需要帳密備援。</div>
+
+  <div class="row">
+    <button id="save" class="secondary">儲存設定</button>
+    <button id="run">▶ 立即執行</button>
+  </div>
+  <div id="status"></div>
+
+  <div class="row" style="margin-top:6px">
+    <button id="clear" class="secondary">清空記錄</button>
+  </div>
+  <pre id="log"></pre>
+
+  <script src="popup.js"></script>
+</body>
+</html>

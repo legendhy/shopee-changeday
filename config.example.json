@@ -1,0 +1,11 @@
+{
+  "account": "your_shopee_account",
+  "password": "your_shopee_password",
+  "spc_f": "paste_the_value_of_the_SPC_F_cookie_here",
+
+  "headless": false,
+  "base_url": "https://seller.shopee.tw",
+  "download_dir": "data",
+  "slow_mo_ms": 120,
+  "viewport": [1366, 800]
+}

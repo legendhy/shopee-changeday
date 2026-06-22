@@ -1,0 +1,38 @@
+# === SECRETS — never commit ===
+ino.txt
+info.txt
+config.json
+.env
+*.secret
+
+# === Agent / editor session (contains transcripts, possibly creds) ===
+.claude/
+
+# === Logs ===
+*.log
+logs/
+
+# === Test output artifacts ===
+extension/test/*.xlsx
+extension/test/*.xls
+
+# === Downloads, generated zips, screenshots ===
+data/
+*.xls
+*.xlsx
+*.zip
+screenshots/
+
+# === Python (abandoned prototype under app/) ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# === Node ===
+node_modules/
+
+# === OS ===
+Thumbs.db
+.DS_Store

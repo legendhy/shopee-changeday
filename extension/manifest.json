@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "蝦皮備貨天數一鍵改1天",
+  "version": "0.1.0",
+  "description": "每周自動把蝦皮台灣賣場所有商品的備貨天數改為 1 天（下載→改值→逐個上傳）。",
+  "permissions": [
+    "cookies",
+    "storage",
+    "downloads",
+    "alarms",
+    "scripting",
+    "tabs",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.shopee.tw/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://seller.shopee.tw/*",
+        "https://accounts.shopee.tw/*",
+        "https://shopee.tw/*"
+      ],
+      "js": ["config.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "蝦皮備貨天數"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
