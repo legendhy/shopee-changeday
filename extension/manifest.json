@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "蝦皮備貨天數一鍵改1天",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "每周自動把蝦皮台灣賣場所有商品的備貨天數改為 1 天（下載→改值→逐個上傳）。",
   "permissions": [
     "cookies",

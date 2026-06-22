@@ -18,6 +18,10 @@ const CONFIG = {
     "https://seller.shopee.tw/api/mass/mpsku/generate_template",
   API_RECORD_LIST:
     "https://seller.shopee.tw/api/tool/mass_product/get_mass_record_list/",
+  // download a finished record's zip directly (no button click needed):
+  //   ?record_id=<id>&timestamp=<ms>&SPC_CDS=<uuid>&SPC_CDS_VER=2
+  API_DOWNLOAD_FILE:
+    "https://seller.shopee.tw/api/tool/mass_product/download_record_file/",
 
   // --- Field to update ---
   DTS_FIELD_KEY: "et_title_product_dts", // 備貨天數 column key in xlsx row 1

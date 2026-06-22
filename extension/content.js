@@ -399,12 +399,14 @@
     const ready = await generateAndWaitDownload();
     await setRun({ readyFilename: ready.result_file_name });
 
-    // register the download waiter FIRST, then click (avoids losing the event)
-    const dlPromise = bg({ type: "AWAIT_DOWNLOAD", timeoutMs: 120000 });
-    await clickRowDownload(ready.result_file_name);
-    await log("waiting for background to capture & edit the zip…");
-    const resp = await dlPromise;
-    if (!resp || !resp.ok) throw new Error("download processing failed: " + (resp && resp.error));
+    // fetch the zip directly via the download API (no button click, no race)
+    await log("asking background to fetch & edit the zip…");
+    const resp = await bg({
+      type: "FETCH_ZIP",
+      recordId: ready.id,
+      filename: ready.result_file_name,
+    });
+    if (!resp || !resp.ok) throw new Error("zip fetch/edit failed: " + (resp && resp.error));
     const files = resp.files;
     await log("got " + files.length + " edited xlsx; switching to 上傳");
 

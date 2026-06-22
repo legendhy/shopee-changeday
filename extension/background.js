@@ -198,6 +198,27 @@ async function processZip(zipBytes) {
   return out;
 }
 
+// --- fetch a finished record's zip directly via the download API (no click) ---
+async function fetchAndProcessById(recordId, filename) {
+  const url =
+    CONFIG.API_DOWNLOAD_FILE +
+    "?record_id=" +
+    recordId +
+    "&timestamp=" +
+    Date.now() +
+    "&SPC_CDS=" +
+    crypto.randomUUID() +
+    "&SPC_CDS_VER=2";
+  await log("fetching zip for record " + recordId + " (" + (filename || "?") + ")");
+  const resp = await fetch(url, { credentials: "include" });
+  if (!resp.ok) throw new Error("download fetch HTTP " + resp.status);
+  const bytes = await resp.arrayBuffer();
+  await log("got zip, " + Math.round(bytes.byteLength / 1024) + " KB");
+  const edited = await processZip(bytes);
+  await log("processed zip → " + edited.length + " edited xlsx files");
+  return edited;
+}
+
 // --- edit one xlsx: set et_title_product_dts column = 1 for all data rows ---
 async function editDtsInXlsx(arrayBuffer) {
   const zip = await JSZip.loadAsync(arrayBuffer);
@@ -306,6 +327,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const files = await awaitDownload(msg.timeoutMs || 120000);
             sendResponse({ ok: true, files });
           } catch (e) {
+            sendResponse({ ok: false, error: e.message });
+          }
+          return;
+        case "FETCH_ZIP":
+          try {
+            const files = await fetchAndProcessById(msg.recordId, msg.filename);
+            sendResponse({ ok: true, files });
+          } catch (e) {
+            await log("FETCH_ZIP failed: " + e.message, "error");
             sendResponse({ ok: false, error: e.message });
           }
           return;
