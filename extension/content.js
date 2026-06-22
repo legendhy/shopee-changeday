@@ -56,6 +56,19 @@
     throw new Error("waitFor timeout (" + timeoutMs + "ms)");
   }
 
+  // Wait until the document has fully loaded (readyState complete) — interacting
+  // before this is a common cause of "element not found" AND looks bot-like.
+  async function ready(minDelay = 600) {
+    while (document.readyState !== "complete") await sleep(150);
+    await sleep(minDelay);
+  }
+
+  // Human-like random pause between actions (anti-detection + lets late UI settle).
+  async function humanPause(min = 700, max = 1600) {
+    const ms = min + Math.floor(Math.random() * (max - min));
+    await sleep(ms);
+  }
+
   // -------------------------------------------------------------------------
   // LOGIN
   // -------------------------------------------------------------------------
@@ -65,10 +78,11 @@
 
   async function doLogin() {
     const cfg = await getConfig();
-    await log("login page — filling credentials");
+    await log("login page — waiting for page to finish loading…");
     if (!cfg.account || !cfg.password) {
       throw new Error("missing account/password in config — cannot log in");
     }
+    await ready(800);
 
     // account input: try several selectors (placeholder text is the most stable)
     const accIn = await waitFor(() => {
@@ -79,10 +93,10 @@
         document.querySelector('input[type="text"]:not([type="password"])') ||
         document.querySelector(CONFIG.SEL.loginAccount)
       );
-    }, 15000);
+    }, 20000);
     const pwIn = await waitFor(
       () => document.querySelector('input[type="password"]'),
-      15000
+      20000
     );
     await log("found login inputs");
 
@@ -98,6 +112,7 @@
       el.dispatchEvent(new Event("change", { bubbles: true }));
     };
     setVal(accIn, cfg.account);
+    await humanPause(300, 700);
     setVal(pwIn, cfg.password);
     await log("filled account/password");
 
@@ -112,6 +127,7 @@
         (b) => b.textContent.trim() === CONFIG.TEXT.login
       );
     });
+    await humanPause(); // human-like pause before submit
 
     await setRun({ step: "goto_mass" }); // after reload, resume here
 
@@ -203,6 +219,7 @@
       () => document.querySelector(CONFIG.SEL.generateBtn),
       20000
     );
+    await humanPause();
     btn.click();
     await log("clicked generate (下載)");
 
@@ -414,17 +431,19 @@
 
   async function runDownloadAndUpload() {
     // ---- download ----
+    await ready();
     await waitFor(() => findDtsRadio(), 30000);
     await selectDts();
-    const ready = await generateAndWaitDownload();
-    await setRun({ readyFilename: ready.result_file_name });
+    await humanPause();
+    const rec = await generateAndWaitDownload();
+    await setRun({ readyFilename: rec.result_file_name });
 
     // fetch the zip directly via the download API (no button click, no race)
     await log("asking background to fetch & edit the zip…");
     const resp = await bg({
       type: "FETCH_ZIP",
-      recordId: ready.id,
-      filename: ready.result_file_name,
+      recordId: rec.id,
+      filename: rec.result_file_name,
     });
     if (!resp || !resp.ok) throw new Error("zip fetch/edit failed: " + (resp && resp.error));
     const files = resp.files;
@@ -455,6 +474,9 @@
 
   // signal that content is alive (helps confirm injection worked)
   console.log("[shopee-dts] content script loaded on", location.href);
-  // auto-resume on load if a run is mid-flight (covers reloads between steps)
+  // auto-resume on load if a run is mid-flight (covers reloads between steps).
+  // Two triggers: a short delay, and again after the window 'load' event, so we
+  // resume even on slow page loads where the early timer fired too soon.
   setTimeout(resume, 600);
+  window.addEventListener("load", () => setTimeout(resume, 500));
 })();
