@@ -86,12 +86,34 @@ let lastEditedAt = 0;
 function matchesDtsDownload(item) {
   const f = item.filename || "";
   const u = item.url || "";
-  return /mass_update_dts/i.test(f) || /mass_update_dts/i.test(u);
+  // at onCreated time the filename may be empty and the url a signed CDN link,
+  // so match generously: any shopee zip, or anything dts-related.
+  return (
+    /mass_update_dts/i.test(f) ||
+    /mass_update_dts/i.test(u) ||
+    /\.zip$/i.test(f) ||
+    (/shopee/i.test(u) && /\.zip/i.test(u))
+  );
 }
 
+// Log EVERY download while we're waiting, so we can see what the page produces
+// even if it doesn't match the matcher.
 chrome.downloads.onCreated.addListener(async (item) => {
-  if (!matchesDtsDownload(item)) return;
-  await log("captured dts download: " + (item.filename || item.url));
+  const matched = matchesDtsDownload(item);
+  if (downloadWaiter && !matched) {
+    await log(
+      "download seen (non-matching, but waiter active — accepting): " +
+        (item.filename || item.url),
+      "warn"
+    );
+  } else if (!matched) {
+    return; // unrelated download, ignore
+  } else {
+    await log("captured download: " + (item.filename || item.url));
+  }
+  // If we're actively waiting, accept ANY download (we just clicked, so it's ours).
+  const target = downloadWaiter ? item : matched ? item : null;
+  if (!target) return;
   const edited = await fetchAndProcess(item);
   if (!edited) return;
   lastEditedFiles = edited;

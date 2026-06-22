@@ -66,25 +66,87 @@
   async function doLogin() {
     const cfg = await getConfig();
     await log("login page — filling credentials");
-    const accIn = await waitFor(() => document.querySelector(CONFIG.SEL.loginAccount));
-    const pwIn = document.querySelector(CONFIG.SEL.loginPassword);
+    if (!cfg.account || !cfg.password) {
+      throw new Error("missing account/password in config — cannot log in");
+    }
+
+    // account input: try several selectors (placeholder text is the most stable)
+    const accIn = await waitFor(() => {
+      return (
+        document.querySelector('input[placeholder*="電話"]') ||
+        document.querySelector('input[placeholder*="Email"]') ||
+        document.querySelector('input[placeholder*="帳號"]') ||
+        document.querySelector('input[type="text"]:not([type="password"])') ||
+        document.querySelector(CONFIG.SEL.loginAccount)
+      );
+    }, 15000);
+    const pwIn = await waitFor(
+      () => document.querySelector('input[type="password"]'),
+      15000
+    );
+    await log("found login inputs");
+
+    // Framework forms (Vue/React) ignore direct `.value =`; use the native setter
+    // so the framework's onChange actually fires and the submit button enables.
     const setVal = (el, v) => {
-      el.focus();
-      el.value = v;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value"
+      ).set;
+      setter.call(el, v);
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     };
-    setVal(accIn, cfg.account || "");
-    setVal(pwIn, cfg.password || "");
-    await sleep(400);
-    const btn = await waitFor(() =>
-      [...document.querySelectorAll(CONFIG.SEL.loginSubmit)].find(
-        (b) => b.textContent.trim() === CONFIG.TEXT.login && !b.disabled
-      )
-    );
+    setVal(accIn, cfg.account);
+    setVal(pwIn, cfg.password);
+    await log("filled account/password");
+
+    // wait until the 登入 button becomes enabled
+    const btn = await waitFor(() => {
+      return [...document.querySelectorAll("button")]
+        .filter((b) => b.textContent.trim() === CONFIG.TEXT.login)
+        .find((b) => !b.disabled && b.getBoundingClientRect().width > 0);
+    }, 8000).catch(async () => {
+      await log("login button still disabled — clicking anyway", "warn");
+      return [...document.querySelectorAll("button")].find(
+        (b) => b.textContent.trim() === CONFIG.TEXT.login
+      );
+    });
+
     await setRun({ step: "goto_mass" }); // after reload, resume here
-    btn.click();
-    // page will navigate → this instance dies; new instance resumes
+
+    // Submit. Framework buttons often ignore a synthetic .click(), so try
+    // several strategies and stop at the first that navigates away.
+    const stillOnLogin = () => /\/login|account\/login/i.test(location.href);
+
+    const form = pwIn.form || accIn.form || document.querySelector("form");
+    const strategies = [];
+    // 1) press Enter on the password field (most native form submit)
+    strategies.push(["enter-key", async () => {
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        pwIn.dispatchEvent(
+          new KeyboardEvent(type, {
+            key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true,
+          })
+        );
+      }
+    }]);
+    // 2) form.requestSubmit()
+    strategies.push(["form-submit", async () => {
+      if (form && typeof form.requestSubmit === "function") form.requestSubmit();
+      else if (form) form.submit();
+    }]);
+    // 3) click the button
+    strategies.push(["button-click", async () => { if (btn) btn.click(); }]);
+
+    for (const [name, fn] of strategies) {
+      await log("login submit attempt: " + name);
+      try { await fn(); } catch (e) { await log("  " + name + " error: " + e.message, "warn"); }
+      // give the page a moment to navigate
+      await sleep(2500);
+      if (!stillOnLogin()) { await log("login succeeded via " + name); return; }
+    }
+    await log("all login strategies exhausted — still on login page", "error");
   }
 
   // -------------------------------------------------------------------------
@@ -108,6 +170,7 @@
       spcCds() +
       "&SPC_CDS_VER=2&page_number=1&page_size=20&operation_type=3";
     const r = await fetch(url, { credentials: "include" });
+    if (!r.ok) return []; // 403/anti-bot: treat as empty, caller retries on next tick
     const j = await r.json();
     return (j && j.data && j.data.list) || [];
   }
@@ -151,7 +214,7 @@
           r.record_status === 1 &&
           r.result_file_name
       );
-    }, CONFIG.GEN_POLL_TIMEOUT_MS);
+    }, CONFIG.GEN_POLL_TIMEOUT_MS, 3000); // poll every 3s (faster hits anti-bot 403)
     await log("template ready: " + ready.result_file_name);
     return ready;
   }
@@ -283,6 +346,7 @@
   async function resume() {
     const run = await getRun();
     if (!run || !run.running) return;
+    await log("content resume: step=" + run.step + " url=" + location.pathname);
 
     try {
       switch (run.step) {
@@ -367,6 +431,8 @@
     }
   });
 
+  // signal that content is alive (helps confirm injection worked)
+  console.log("[shopee-dts] content script loaded on", location.href);
   // auto-resume on load if a run is mid-flight (covers reloads between steps)
   setTimeout(resume, 600);
 })();
