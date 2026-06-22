@@ -346,33 +346,53 @@
   async function resume() {
     const run = await getRun();
     if (!run || !run.running) return;
-    await log("content resume: step=" + run.step + " url=" + location.pathname);
+    const loginAttempts = run.loginAttempts || 0;
+    await log("content resume: step=" + run.step + " attempts=" + loginAttempts + " url=" + location.pathname);
 
     try {
       switch (run.step) {
         case "login": {
-          if (onLoginPage()) {
-            await doLogin(); // navigates → instance dies → resume on next load
+          if (!onLoginPage()) {
+            // already authenticated (SPC_F worked or already logged in)
+            await setRun({ step: "goto_mass", loginAttempts: 0 });
+            location.href = CONFIG.MASS_UPDATE_URL;
             return;
           }
-          // already authenticated
-          await setRun({ step: "goto_mass" });
-          location.href = CONFIG.MASS_UPDATE_URL;
+          if (loginAttempts >= 3) {
+            throw new Error("登入失敗超過 3 次（可能卡驗證碼 / SPC_F 失效 / 帳密錯）— 停止");
+          }
+          await setRun({ loginAttempts: loginAttempts + 1 });
+          await doLogin(); // navigates → instance dies → resume on next load
           return;
         }
 
         case "goto_mass": {
+          // ⚠️ if we ended up back on the login page, the session is invalid.
+          // Do NOT keep redirecting to the download tab (that loops forever);
+          // fall back to a fresh form login.
+          if (onLoginPage()) {
+            await log("在登入頁（session 失效）→ 改走表單登入", "warn");
+            if (loginAttempts >= 3) throw new Error("登入迴圈 — 停止");
+            await setRun({ step: "login", loginAttempts: loginAttempts + 1 });
+            // ask background to clear any stale SPC_F so it won't interfere
+            await bg({ type: "CLEAR_SPC_F" }).catch(() => {});
+            await doLogin();
+            return;
+          }
           if (!/mass-update\/download/.test(location.href)) {
             location.href = CONFIG.DOWNLOAD_TAB_URL;
             return;
           }
-          await setRun({ step: "download" });
+          await setRun({ step: "download", loginAttempts: 0 });
           await runDownloadAndUpload();
           return;
         }
 
         case "download": {
-          // landed here after a reload mid-download (rare); redo from download tab
+          if (onLoginPage()) {
+            await setRun({ step: "login" });
+            return; // next load handles login
+          }
           if (!/mass-update\/download/.test(location.href)) {
             location.href = CONFIG.DOWNLOAD_TAB_URL;
             return;

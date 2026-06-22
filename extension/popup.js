@@ -40,6 +40,12 @@ $("clear").addEventListener("click", async () => {
   logEl.innerHTML = "";
 });
 
+$("reset").addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "RESET" });
+  statusEl.textContent = "已重置狀態（可重新執行）";
+  $("run").disabled = false;
+});
+
 let lastCount = 0;
 async function refresh() {
   const resp = await chrome.runtime.sendMessage({ type: "GET_STATE" });

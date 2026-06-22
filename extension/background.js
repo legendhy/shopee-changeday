@@ -302,6 +302,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           await setState({ running: false, finishedAt: Date.now() });
           sendResponse({ ok: true });
           return;
+        case "CLEAR_SPC_F":
+          try {
+            await chrome.cookies.remove({ url: "https://shopee.tw", name: "SPC_F" });
+            await chrome.cookies.remove({ url: "https://seller.shopee.tw", name: "SPC_F" });
+            await chrome.cookies.remove({ url: "https://accounts.shopee.tw", name: "SPC_F" });
+            await log("cleared stale SPC_F cookie");
+            sendResponse({ ok: true });
+          } catch (e) {
+            sendResponse({ ok: false, error: e.message });
+          }
+          return;
+        case "RESET":
+          // force-clear a stuck run (e.g. browser closed mid-flow)
+          await chrome.storage.local.remove("shopee_dts_run");
+          await setState({ running: false });
+          await log("run state reset (manual)", "warn");
+          sendResponse({ ok: true });
+          return;
         case "NOTIFY":
           notify(msg.title, msg.body);
           sendResponse({ ok: true });
@@ -332,13 +350,21 @@ function notify(title, body) {
 // ---------------------------------------------------------------------------
 async function startRun(fromBackground) {
   await setState({ running: true, startedAt: Date.now(), error: null });
-  // persisted flow state for the content-script state machine
+  // persisted flow state for the content-script state machine (fresh run)
   await chrome.storage.local.set({
-    shopee_dts_run: { running: true, step: "login", startedAt: Date.now() },
+    shopee_dts_run: {
+      running: true,
+      step: "login",
+      startedAt: Date.now(),
+      loginAttempts: 0,
+    },
   });
   await log(fromBackground ? "weekly run triggered" : "manual run triggered");
   await injectSpcF();
-  const tabId = await getOrCreateSellerTab(CONFIG.LOGIN_URL);
+  // Open the seller HOME (not the login URL). If SPC_F is valid, we land in the
+  // seller center and skip login; if not, Shopee redirects to the login page and
+  // the content script does a form login (clearing the stale SPC_F first).
+  const tabId = await getOrCreateSellerTab(CONFIG.SELLER_HOME);
   // content auto-resumes on load; also kick it explicitly as backup
   setTimeout(() => {
     chrome.tabs.sendMessage(tabId, { type: "RUN_FLOW" }).catch(() => {});
