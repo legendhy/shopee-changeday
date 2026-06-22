@@ -79,110 +79,57 @@ async function getOrCreateSellerTab(url) {
 // ---------------------------------------------------------------------------
 // download capture + zip/xlsx processing
 // ---------------------------------------------------------------------------
-let downloadWaiter = null; // { resolve, reject, timer }
-let lastEditedFiles = null; // cache: if download arrives before waiter, hand it out later
-let lastEditedAt = 0;
+// When true, the fetched zip and each edited xlsx are also written to the Downloads
+// folder (subfolder "shopee-dts-edited/<timestamp>/") for verification/backup.
+// Editing itself still happens in memory (MV3 can't read disk files without a user
+// file-picker), but the footprint is small (~8MB) and persisting outputs helps.
+let saveToDisk = true;
 
-function matchesDtsDownload(item) {
-  const f = item.filename || "";
-  const u = item.url || "";
-  // at onCreated time the filename may be empty and the url a signed CDN link,
-  // so match generously: any shopee zip, or anything dts-related.
-  return (
-    /mass_update_dts/i.test(f) ||
-    /mass_update_dts/i.test(u) ||
-    /\.zip$/i.test(f) ||
-    (/shopee/i.test(u) && /\.zip/i.test(u))
-  );
+function _bytesToBase64(bytes) {
+  // chunked to avoid call-stack limits on large buffers
+  const CHUNK = 0x8000;
+  let bin = "";
+  const u8 = new Uint8Array(bytes);
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 
-// Log EVERY download while we're waiting, so we can see what the page produces
-// even if it doesn't match the matcher.
-chrome.downloads.onCreated.addListener(async (item) => {
-  const matched = matchesDtsDownload(item);
-  if (downloadWaiter && !matched) {
-    await log(
-      "download seen (non-matching, but waiter active — accepting): " +
-        (item.filename || item.url),
-      "warn"
-    );
-  } else if (!matched) {
-    return; // unrelated download, ignore
-  } else {
-    await log("captured download: " + (item.filename || item.url));
-  }
-  // If we're actively waiting, accept ANY download (we just clicked, so it's ours).
-  const target = downloadWaiter ? item : matched ? item : null;
-  if (!target) return;
-  const edited = await fetchAndProcess(item);
-  if (!edited) return;
-  lastEditedFiles = edited;
-  lastEditedAt = Date.now();
-  if (downloadWaiter) {
-    const w = downloadWaiter;
-    downloadWaiter = null;
-    clearTimeout(w.timer);
-    w.resolve(edited);
-  }
-});
-
-async function fetchAndProcess(item) {
-  let bytes;
-  try {
-    const resp = await fetch(item.url, { credentials: "include" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    bytes = await resp.arrayBuffer();
-  } catch (e) {
-    try {
-      const r2 = await fetch(item.finalUrl || item.url, { credentials: "include" });
-      bytes = await r2.arrayBuffer();
-    } catch (e2) {
-      await log("failed to fetch download bytes: " + e2.message, "error");
-      if (downloadWaiter) {
-        const w = downloadWaiter;
-        downloadWaiter = null;
-        clearTimeout(w.timer);
-        w.reject(e2);
-      }
-      return null;
-    }
-  }
-  try {
-    const edited = await processZip(bytes);
-    await log(`processed zip → ${edited.length} edited xlsx files`);
-    return edited;
-  } catch (e) {
-    await log("zip processing failed: " + e.message, "error");
-    if (downloadWaiter) {
-      const w = downloadWaiter;
-      downloadWaiter = null;
-      clearTimeout(w.timer);
-      w.reject(e);
-    }
-    return null;
-  }
+function _runStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
 }
 
-async function awaitDownload(timeoutMs = 120000) {
-  // if a download was already processed just now, hand it back immediately
-  if (lastEditedFiles && Date.now() - lastEditedAt < 120000) {
-    const f = lastEditedFiles;
-    lastEditedFiles = null;
-    return f;
-  }
-  return new Promise((resolve, reject) => {
-    downloadWaiter = {
-      resolve,
-      reject,
-      timer: setTimeout(() => {
-        downloadWaiter = null;
-        reject(new Error("download capture timed out"));
-      }, timeoutMs),
-    };
+async function saveZipToDisk(zipUrl, filename) {
+  // let Chrome re-fetch the cookie-authenticated URL and save the raw zip
+  const id = await chrome.downloads.download({
+    url: zipUrl,
+    filename: "shopee-dts-edited/" + _runStamp() + "/" + filename,
+    saveAs: false,
+    conflictAction: "uniquify",
   });
+  await log("saved zip to disk: " + filename + " (dl #" + id + ")");
 }
 
-// --- zip → edited xlsx files ----------------------------------------------
+async function saveEditedToDisk(files, originName) {
+  const stamp = _runStamp();
+  for (const f of files) {
+    const dataUrl =
+      "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," +
+      _bytesToBase64(f.bytes);
+    await chrome.downloads.download({
+      url: dataUrl,
+      filename: "shopee-dts-edited/" + stamp + "/edited_" + f.name,
+      saveAs: false,
+      conflictAction: "uniquify",
+    });
+  }
+  await log("saved " + files.length + " edited xlsx to Downloads/shopee-dts-edited/" + stamp + "/");
+}
+
+// --- zip → edited xlsx files  ----------------------------------------------
 async function processZip(zipBytes) {
   const zip = await JSZip.loadAsync(zipBytes);
   const out = [];
@@ -214,8 +161,10 @@ async function fetchAndProcessById(recordId, filename) {
   if (!resp.ok) throw new Error("download fetch HTTP " + resp.status);
   const bytes = await resp.arrayBuffer();
   await log("got zip, " + Math.round(bytes.byteLength / 1024) + " KB");
+  if (saveToDisk) await saveZipToDisk(url, filename || ("record_" + recordId + ".zip")).catch(e => log("save zip failed: " + e.message, "warn"));
   const edited = await processZip(bytes);
   await log("processed zip → " + edited.length + " edited xlsx files");
+  if (saveToDisk) await saveEditedToDisk(edited, filename || "").catch(e => log("save edited failed: " + e.message, "warn"));
   return edited;
 }
 
@@ -321,14 +270,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       switch (msg && msg.type) {
         case "INJECT_COOKIE":
           sendResponse({ ok: await injectSpcF() });
-          return;
-        case "AWAIT_DOWNLOAD":
-          try {
-            const files = await awaitDownload(msg.timeoutMs || 120000);
-            sendResponse({ ok: true, files });
-          } catch (e) {
-            sendResponse({ ok: false, error: e.message });
-          }
           return;
         case "FETCH_ZIP":
           try {
