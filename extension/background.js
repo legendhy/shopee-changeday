@@ -82,6 +82,9 @@ function cds() {
 }
 
 async function apiGenerate() {
+  // capture the baseline BEFORE generating, so we can detect the NEW record
+  const before = await apiList(3);
+  const maxBefore = before.length ? Math.max(...before.map((x) => x.id)) : 0;
   const url = CONFIG.API_GENERATE_TEMPLATE + "?" + new URLSearchParams(cds());
   const r = await fetch(url, {
     method: "POST", credentials: "include",
@@ -90,8 +93,7 @@ async function apiGenerate() {
   });
   const j = await r.json().catch(() => ({}));
   if (r.status !== 200 || j.code !== 0) throw new Error(`generate failed: HTTP ${r.status} ${JSON.stringify(j).slice(0,120)}`);
-  const recs = await apiList(3);
-  return recs.length ? Math.max(...recs.map((x) => x.id)) : 0;
+  return maxBefore; // runFlow polls for id > maxBefore
 }
 
 async function apiList(op) {
@@ -112,6 +114,8 @@ async function apiDownloadZip(recordId) {
 }
 
 async function apiUpload(filename, bytes) {
+  const before = await apiList(4);
+  const maxBefore = before.length ? Math.max(...before.map((x) => x.id)) : 0;
   const url = CONFIG.API_UPLOAD_TEMPLATE + "?" + new URLSearchParams(cds());
   const fd = new FormData();
   fd.append("file", new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
@@ -119,8 +123,7 @@ async function apiUpload(filename, bytes) {
   const r = await fetch(url, { method: "POST", credentials: "include", body: fd });
   const j = await r.json().catch(() => ({}));
   if (r.status !== 200 || j.code !== 0) throw new Error(`upload ${filename} failed: HTTP ${r.status} ${JSON.stringify(j).slice(0,120)}`);
-  const recs = await apiList(4);
-  return recs.length ? Math.max(...recs.map((x) => x.id)) : 0;
+  return maxBefore; // runFlow polls op=4 for id > maxBefore (the new upload)
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -235,7 +238,7 @@ async function runFlow() {
     await log("uploaded " + f.name + " (record " + upId + "), waiting for 完成…");
     const ok = await waitFor(async () => {
       const recs = await apiList(4);
-      const n = recs.filter((x) => x.id >= upId).sort((a, b) => b.id - a.id)[0];
+      const n = recs.filter((x) => x.id > upId).sort((a, b) => b.id - a.id)[0];
       if (!n) return null;
       if (n.record_status === 1) {
         if ((n.handled_count || 0) >= (n.total_count || 0)) return "done";
@@ -249,7 +252,7 @@ async function runFlow() {
       const upId2 = await apiUpload(f.name, f.bytes);
       await waitFor(async () => {
         const recs = await apiList(4);
-        const n = recs.filter((x) => x.id >= upId2).sort((a, b) => b.id - a.id)[0];
+        const n = recs.filter((x) => x.id > upId2).sort((a, b) => b.id - a.id)[0];
         return n && n.record_status === 1 ? true : null;
       }, CONFIG.UPLOAD_SETTLE_TIMEOUT_MS).catch(() => {});
       await log("重傳 " + f.name + " 已提交");
