@@ -2,6 +2,7 @@
 ino.txt
 info.txt
 config.json
+cookies.json
 .env
 *.secret
 
